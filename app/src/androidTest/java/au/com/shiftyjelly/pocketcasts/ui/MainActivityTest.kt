@@ -71,7 +71,7 @@ class MainActivityTest {
         device = UiDevice.getInstance(getInstrumentation())
     }
 
-//    @Test
+    @Test
     fun mainActivityTest() {
         if (!RUN_SCREENSHOTS) {
             return
