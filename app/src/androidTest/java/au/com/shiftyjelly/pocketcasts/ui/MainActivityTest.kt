@@ -1,6 +1,8 @@
 package au.com.shiftyjelly.pocketcasts.ui
 
 import android.Manifest
+import android.content.Intent
+import android.os.IBinder
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
@@ -11,6 +13,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.recyclerview.widget.RecyclerView
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.ViewInteraction
@@ -30,7 +33,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
 import androidx.test.platform.app.InstrumentationRegistry.getInstrumentation
 import androidx.test.rule.GrantPermissionRule
+import androidx.test.rule.ServiceTestRule
 import androidx.test.uiautomator.UiDevice
+import au.com.shiftyjelly.pocketcasts.PocketCastsApplication
+import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
+import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
+import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackService
+import au.com.shiftyjelly.pocketcasts.repositories.playback.PlayerNotificationManager
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import com.adevinta.android.barista.interaction.BaristaClickInteractions.clickOn
 import org.hamcrest.Description
@@ -45,6 +54,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import timber.log.Timber
 import java.io.File
+import org.mockito.kotlin.mock
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.any
 import au.com.shiftyjelly.pocketcasts.discover.R as DR
 import au.com.shiftyjelly.pocketcasts.podcasts.R as PR
 import au.com.shiftyjelly.pocketcasts.views.R as VR
@@ -57,7 +69,11 @@ class MainActivityTest {
 
     @get:Rule var activityRule: ActivityScenarioRule<MainActivity> = ActivityScenarioRule(MainActivity::class.java)
     @get:Rule val composeTestRule = createAndroidComposeRule<MainActivity>()
-    @get:Rule var permissionRule = GrantPermissionRule.grant(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    @get:Rule var permissionRule = GrantPermissionRule.grant(
+        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        Manifest.permission.POST_NOTIFICATIONS
+    )
+    @get:Rule val serviceRule = ServiceTestRule()
 
     lateinit var device: UiDevice
 
@@ -77,6 +93,33 @@ class MainActivityTest {
         for (theme in Theme.ThemeType.values()) {
             takeScreenshots()
         }
+    }
+
+    @Test
+    fun invokeNotify_onlyWhenNotificationPermissionIsEnabled() {
+        val application = ApplicationProvider.getApplicationContext<PocketCastsApplication>()
+
+        // Create the service Intent.
+        val serviceIntent = Intent(
+            application,
+            PlaybackService::class.java
+        )
+
+        // Bind the service and grab a reference to the binder.
+        val binder: IBinder = serviceRule.bindService(serviceIntent)
+
+        // Get the reference to the service, or you can call
+        // public methods on the binder directly.
+        val service: PlaybackService = (binder as PlaybackService.LocalBinder).service
+        val testNotificationManager = mock<PlayerNotificationManager> { }
+        val testPlaybackManager = mock<PlaybackManager> { }
+
+        service.notificationManager = testNotificationManager
+        service.playbackManager = testPlaybackManager
+
+        testPlaybackManager.sendDataWarningNotification(mock<BaseEpisode>())
+
+        verify(testNotificationManager.notify(any(), any()))
     }
 
     private fun takeScreenshots() {
