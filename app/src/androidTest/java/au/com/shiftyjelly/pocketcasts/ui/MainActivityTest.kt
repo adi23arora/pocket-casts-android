@@ -34,12 +34,13 @@ import androidx.test.filters.LargeTest
 import androidx.test.platform.app.InstrumentationRegistry.getInstrumentation
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.rule.ServiceTestRule
+import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import au.com.shiftyjelly.pocketcasts.PocketCastsApplication
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
-import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
+import au.com.shiftyjelly.pocketcasts.repositories.di.NotificationPermissionChecker
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackService
-import au.com.shiftyjelly.pocketcasts.repositories.playback.PlayerNotificationManager
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import com.adevinta.android.barista.interaction.BaristaClickInteractions.clickOn
 import org.hamcrest.Description
@@ -52,11 +53,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.kotlin.mock
 import timber.log.Timber
 import java.io.File
-import org.mockito.kotlin.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.any
 import au.com.shiftyjelly.pocketcasts.discover.R as DR
 import au.com.shiftyjelly.pocketcasts.podcasts.R as PR
 import au.com.shiftyjelly.pocketcasts.views.R as VR
@@ -96,30 +95,39 @@ class MainActivityTest {
     }
 
     @Test
-    fun invokeNotify_onlyWhenNotificationPermissionIsEnabled() {
+    fun dataWarningNotification_isShown_whenPermissionGranted() {
         val application = ApplicationProvider.getApplicationContext<PocketCastsApplication>()
 
-        // Create the service Intent.
-        val serviceIntent = Intent(
-            application,
-            PlaybackService::class.java
-        )
-
-        // Bind the service and grab a reference to the binder.
+        val serviceIntent = Intent(application, PlaybackService::class.java)
         val binder: IBinder = serviceRule.bindService(serviceIntent)
-
-        // Get the reference to the service, or you can call
-        // public methods on the binder directly.
         val service: PlaybackService = (binder as PlaybackService.LocalBinder).service
-        val testNotificationManager = mock<PlayerNotificationManager> { }
-        val testPlaybackManager = mock<PlaybackManager> { }
 
-        service.notificationManager = testNotificationManager
-        service.playbackManager = testPlaybackManager
+        // In tests, the activity is not created in a way that sets this up, so we do it manually.
+        service.playbackManager.setNotificationPermissionChecker(object : NotificationPermissionChecker {
+            override fun checkNotificationPermission(onPermissionGranted: () -> Unit) {
+                // The test has permissions granted via GrantPermissionRule, so we can just run the lambda.
+                onPermissionGranted()
+            }
+        })
 
-        testPlaybackManager.sendDataWarningNotification(mock<BaseEpisode>())
+        // A mock episode is sufficient to trigger the notification.
+        val episode = mock<BaseEpisode>()
 
-        verify(testNotificationManager.notify(any(), any()))
+        // This method should post a notification. We use reflection because it's private.
+        val method = service.playbackManager.javaClass.getDeclaredMethod("sendDataWarningNotification", BaseEpisode::class.java)
+        method.isAccessible = true
+        method.invoke(service.playbackManager, episode)
+
+
+        device.openNotification()
+
+        val notificationText = "This episode is not downloaded, do you want to stream it?"
+        val notification = device.wait(Until.findObject(By.textContains(notificationText)), 5000)
+
+        assert(notification != null) { "Data warning notification not found." }
+
+        // Clean up by closing the notification shade.
+        device.pressBack()
     }
 
     private fun takeScreenshots() {
